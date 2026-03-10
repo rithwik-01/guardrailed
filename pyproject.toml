@@ -1,0 +1,109 @@
+[tool.poetry]
+name = "Guardrailed"
+version = "0.1.0"
+description = "AI gateway with LLM security guardrails"
+authors = ["Rithwik Reddy Eedula <rithwikreddy.eedula@sjsu.edu>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = {extras = ["standard"], version = "^0.115.11"}
+prometheus-client = "^0.21.1"
+motor = "^3.7.0"
+torch = "^2.6.0"
+transformers = "^4.49.0"
+aiohttp = "^3.11.13"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+httpx = "^0.28.1"
+pytest-cov = "^6.1.1"
+pyyaml = "^6.0.2"
+presidio-analyzer = {extras = ["transformers"], version = "^2.2.358"}
+presidio-anonymizer = "^2.2.358"
+rapidfuzz = "^3.13.0"
+openai = "^1.75.0"
+google-generativeai = "^0.8.5"
+anthropic = "^0.49.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.2.0"
+ruff = "^0.3.0"
+mypy = "^1.15.0"
+pytest = "^8.3.4"
+pre-commit = "^3.6.0"
+isort = "^5.13.0"
+types-redis = "^4.6.0"
+types-requests = "^2.31.0"
+celery-types = "^0.22.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+include = '\.pyi?$'
+
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+exclude = ["examples", "tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+indent-width = 4
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "scripts",
+]
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
+docstring-code-line-length = "dynamic"
