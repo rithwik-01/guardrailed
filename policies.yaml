@@ -1,0 +1,89 @@
+policies:
+  # PII Check
+  - id: 1 # Corresponds to PolicyType.PII_LEAKAGE
+    name: "PII Check"
+    message: "Potentially sensitive information detected."
+    state: true               # Enable this policy
+    is_user_policy: true
+    is_llm_policy: true
+    action: 0                 # 0 = Action.Override
+    # Specify US-specific and common global entities
+    pii_entities:
+      # Common Global
+      - EMAIL_ADDRESS
+      - PHONE_NUMBER
+      - IP_ADDRESS
+      - URL
+      # Financial
+      - CREDIT_CARD
+
+      # USA Specific
+      - US_SSN
+      - US_DRIVER_LICENSE
+      - US_ITIN
+      - US_PASSPORT
+      - US_BANK_NUMBER
+      # Other potentially sensitive
+      - MEDICAL_LICENSE
+    pii_threshold: 0.6        # Confidence threshold
+
+  # Toxicity Check
+  - id: 6 # Corresponds to PolicyType.PROFANITY
+    name: "Toxicity Check"
+    is_user_policy: true
+    is_llm_policy: true
+    action: 0 # Override
+    message: "Inappropriate language detected."
+    state: true
+    threshold: 0.75
+
+  # Competitor Check
+  - id: 3 # Corresponds to PolicyType.COMPETITOR_CHECK
+    name: "Competitor Check"
+    is_user_policy: false
+    is_llm_policy: true
+    action: 1 # Observe
+    message: "Competitor name mentioned."
+    state: true
+    threshold: 0.8
+    competitors:
+      - "EvilCorp"
+      - "MegaGlobal Inc"
+
+  # Prompt Leakage Check
+  - id: 2 # Corresponds to PolicyType.PROMPT_LEAKAGE
+    name: "Prompt Leakage Check"
+    is_user_policy: true
+    is_llm_policy: false
+    action: 0 # Override
+    message: "Potential prompt leakage detected."
+    state: true
+    protected_prompts:
+      - "Internal Secret Codeword: Alpha"
+      - "API_KEY_XYZ"
+
+  # Person Check
+  - id: 4 # Corresponds to PolicyType.PERSON_CHECK
+    name: "Specific Person Mention (NER)"
+    is_user_policy: true
+    is_llm_policy: true
+    action: 1 # Observe
+    message: "Specific person mentioned (via NER)."
+    state: false
+    threshold: 0.85
+    persons:
+      - "John Doe"
+      - "Jane Smith"
+
+  # Location Check
+  - id: 5 # Corresponds to PolicyType.LOCATION_CHECK
+    name: "Specific Location Mention (NER)"
+    is_user_policy: true
+    is_llm_policy: true
+    action: 1 # Observe
+    message: "Specific location mentioned (via NER)."
+    state: false
+    threshold: 0.9
+    locations:
+      - "Area 51"
+      - "Secret HQ"
