@@ -1,0 +1,34 @@
+# Use this file to easily run the Guardrailed gateway in a containerized environment.
+#
+# Usage:
+#   - Start the service in the background:  docker-compose up -d
+#   - View logs:                          docker-compose logs -f
+#   - Stop the service:                   docker-compose down
+#   - Rebuild and restart:                docker-compose up -d --build
+
+version: "3.8"
+
+services:
+  guardrailed:
+    build: .
+    container_name: guardrailed
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    env_file:
+      - .env
+
+    volumes:
+      - ./policies.yaml:/app/policies.yaml
+      - guardrailed_hf_cache:/root/.cache/huggingface
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  guardrailed_hf_cache:
