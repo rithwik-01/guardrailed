@@ -1,0 +1,4 @@
+requests
+openai==1.75.0
+google-generativeai==0.8.5
+anthropic==0.49.0
