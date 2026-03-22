@@ -1,4 +1,4 @@
-# Guardrailed
+![Guardrailed](readme_assets/guardrailed-logo.svg)
 
 Guardrailed is an open-source AI gateway that provides guardrails for LLM applications, intercepting API calls to validate and sanitize requests and responses in real-time.
 
