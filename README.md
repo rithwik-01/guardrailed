@@ -20,7 +20,7 @@ Prerequisites: Docker and Docker Compose.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/guardrailed/guardrailed.git
+   git clone https://github.com/rithwik-01/guardrailed.git
    cd guardrailed
    ```
 
