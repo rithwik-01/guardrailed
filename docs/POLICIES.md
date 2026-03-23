@@ -52,6 +52,12 @@ A policy is a rule that Guardrailed evaluates for each message passing through t
 |-------|------|---------|-------------|
 | threshold | float | - | Confidence cutoff for profanity classification |
 
+### Prompt injection (id: 7)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| injection_threshold | float | 0.5 | Minimum confidence score on the INJECTION label to trigger a violation. |
+
 ## Reference tables
 
 ### Policy types
@@ -64,6 +70,7 @@ A policy is a rule that Guardrailed evaluates for each message passing through t
 | 4 | PERSON_CHECK | Detects person mentions via NER | persons, threshold |
 | 5 | LOCATION_CHECK | Detects location mentions via NER | locations, threshold |
 | 6 | PROFANITY | Detects toxic language via classification | threshold |
+| 7 | PROMPT_INJECTION | Detects prompt injection attempts using a local DeBERTa-v3 classifier. | injection_threshold |
 
 ### Actions
 
@@ -87,6 +94,7 @@ Guardrailed returns a safety code in the `X-Guardrailed-Safety-Code` response he
 | 40 | PERSON_DETECTED | 4 |
 | 50 | LOCATION_DETECTED | 5 |
 | 60 | PROFANITY | 6 |
+| 70 | INJECTION_DETECTED | 7 |
 | -10 | GENERIC_UNSAFE | N/A |
 | -70 | UNEXPECTED | N/A |
 | -80 | TIMEOUT | N/A |
@@ -143,6 +151,21 @@ This policy prevents the LLM from mentioning internal project codenames in respo
     - "Bluebird Initiative"
     - "Internal-API-Key-v2"
   prompt_leakage_threshold: 0.90
+```
+
+### Detect prompt injection in user input
+
+This policy blocks user requests that attempt prompt injection attacks, such as jailbreak attempts or instructions to ignore system prompts.
+
+```yaml
+- id: 7
+  name: "Block prompt injection attempts"
+  state: true
+  is_user_policy: true
+  is_llm_policy: false
+  action: 0
+  message: "Your request was blocked because it appears to contain a prompt injection attempt."
+  injection_threshold: 0.5
 ```
 
 ## Full example

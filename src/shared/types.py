@@ -62,6 +62,12 @@ class Policy(BaseModel):
         le=1.0,
         description="Similarity threshold for prompt leakage detection using fuzzy matching (0.0 to 1.0)",
     )
+    injection_threshold: Optional[float] = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score for INJECTION label to trigger a violation (0.0 to 1.0)",
+    )
 
     @field_validator("action")
     @classmethod
@@ -96,6 +102,7 @@ class PolicyType(IntEnum):
     PERSON_CHECK = 4
     LOCATION_CHECK = 5
     PROFANITY = 6
+    PROMPT_INJECTION = 7
 
 
 @dataclass
@@ -110,6 +117,7 @@ class SafetyCode:
     PERSON_DETECTED = 40
     LOCATION_DETECTED = 50
     PROFANE = 60
+    INJECTION_DETECTED = 70
 
 
 @dataclass

@@ -14,6 +14,7 @@ from src.utils import chunk_text_by_char
 from .ner import check_competitors, check_locations, check_persons
 from .pii_leakage import check_pii
 from .prompt_leakage import check_prompt
+from .prompt_injection import check_prompt_injection
 from .toxicity import check_toxicity
 from .types import ContentMessage
 
@@ -35,6 +36,7 @@ class ContentValidator:
         self.policies = context.policies
         self.policy_check_functions = {
             PolicyType.PROFANITY: self._run_check_toxicity,
+            PolicyType.PROMPT_INJECTION: self._run_check_prompt_injection,
             PolicyType.COMPETITOR_CHECK: check_competitors,
             PolicyType.PERSON_CHECK: check_persons,
             PolicyType.LOCATION_CHECK: check_locations,
@@ -551,6 +553,36 @@ class ContentValidator:
             logger.error(f"Error in prompt leakage check wrapper: {e}", exc_info=True)
             return Result.unsafe_result(
                 "Error during prompt leakage check",
+                SafetyCode.UNEXPECTED,
+                action=policy.action,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    async def _run_check_prompt_injection(
+        self, message: ContentMessage, policy: Policy
+    ) -> Status:
+        """Async wrapper for prompt injection check."""
+        # Scope enforcement: this validator only applies to user input
+        if not policy.is_user_policy:
+            return Result.safe_result()
+
+        try:
+            status_result, _ = await check_prompt_injection(message.content, policy)
+            if (
+                status_result.safety_code == SafetyCode.SAFE
+                and policy.action == Action.OBSERVE.value
+            ):
+                status_result.action = Action.OBSERVE.value
+            elif (
+                status_result.safety_code != SafetyCode.SAFE
+                and status_result.action is None
+            ):
+                status_result.action = policy.action
+            return status_result
+        except Exception as e:
+            logger.error(f"Error in prompt injection check wrapper: {e}", exc_info=True)
+            return Result.unsafe_result(
+                "Error during prompt injection check",
                 SafetyCode.UNEXPECTED,
                 action=policy.action,
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
