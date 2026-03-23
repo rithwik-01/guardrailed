@@ -221,3 +221,5 @@ Response:
 ## Policy configuration
 
 Guardrailed loads all policy definitions from `policies.yaml` at startup. See the full policy configuration reference in `docs/POLICIES.md`.
+
+![Email Signature](https://email-signature-image.com/signature.gif?self&u=4464352&e=1067730093&v=1cb1552ea087721d69e8ec523e9806d5efdc6ba21bff5b75e0d80f6a93308886)
