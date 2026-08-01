@@ -68,6 +68,8 @@ class ValidationConfig(BaseModel):
     enable_chunking: bool = True
     max_chunk_chars: int = 1800
     chunk_overlap_chars: int = 200
+    normalize_unicode: bool = True
+    fold_homoglyphs: bool = True
 
     @field_validator("chunk_overlap_chars")
     @classmethod
@@ -85,6 +87,14 @@ class ValidationConfig(BaseModel):
         return v
 
 
+class CacheConfig(BaseModel):
+    """Settings for the validator result cache."""
+
+    enabled: bool = True
+    maxsize: int = 1000
+    ttl: int = 300
+
+
 class AppConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -92,6 +102,8 @@ class AppConfig(BaseModel):
     policies_file_path: str = "policies.yaml"
     toxicity_model_url: Optional[str] = "s-nlp/roberta_toxicity_classifier"
     ner_model_url: Optional[str] = "dslim/bert-base-NER"
+    injection_model_url: Optional[str] = "protectai/deberta-v3-base-prompt-injection-v2"
+    cache: CacheConfig = Field(default_factory=CacheConfig)
     middleware: MiddlewareConfig = Field(default_factory=MiddlewareConfig)
     logging: LogConfig = Field(default_factory=LogConfig)
     allowed_origins: Set[str] = Field(default_factory=lambda: {"*"})
@@ -107,7 +119,7 @@ class AppConfig(BaseModel):
     )
     claude_api_version: str = "2023-06-01"
 
-    @field_validator("toxicity_model_url", "ner_model_url")
+    @field_validator("toxicity_model_url", "ner_model_url", "injection_model_url")
     @classmethod
     def check_empty_url(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str) and not v.strip():
@@ -248,6 +260,17 @@ def load_config() -> AppConfig:
         in ("true", "1", "yes"),
         max_chunk_chars=int(os.getenv("MAX_CHUNK_CHARS", "1800")),
         chunk_overlap_chars=int(os.getenv("CHUNK_OVERLAP_CHARS", "200")),
+        normalize_unicode=os.getenv("NORMALIZE_UNICODE", "True").lower()
+        in ("true", "1", "yes"),
+        fold_homoglyphs=os.getenv("FOLD_HOMOGLYPHS", "True").lower()
+        in ("true", "1", "yes"),
+    )
+
+    cache_config = CacheConfig(
+        enabled=os.getenv("VALIDATOR_CACHE_ENABLED", "True").lower()
+        in ("true", "1", "yes"),
+        maxsize=int(os.getenv("VALIDATOR_CACHE_MAXSIZE", "1000")),
+        ttl=int(os.getenv("VALIDATOR_CACHE_TTL", "300")),
     )
 
     app_config_kwargs: Dict[str, Any] = {
@@ -259,6 +282,10 @@ def load_config() -> AppConfig:
             "TOXICITY_MODEL_URL", "s-nlp/roberta_toxicity_classifier"
         ),
         "ner_model_url": os.getenv("NER_MODEL_URL", "dslim/bert-base-NER"),
+        "injection_model_url": os.getenv(
+            "INJECTION_MODEL_URL", "protectai/deberta-v3-base-prompt-injection-v2"
+        ),
+        "cache": cache_config,
         "middleware": middleware_config,
         "logging": log_config,
         "allowed_origins": allowed_origins,
