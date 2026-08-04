@@ -77,7 +77,7 @@ async def test_check_toxicity_safe_result(
 
     status_result, token_count = await check_toxicity(message, toxicity_policy)
 
-    mock_profanity_model.predict.assert_awaited_once_with(message.lower())
+    mock_profanity_model.predict.assert_awaited_once_with(message)
     assert status_result.safety_code == SafetyCode.SAFE
     assert status_result.status == status.HTTP_200_OK
     assert status_result.action is None
@@ -99,7 +99,7 @@ async def test_check_toxicity_above_threshold_override(
 
     status_result, token_count = await check_toxicity(message, toxicity_policy)
 
-    mock_profanity_model.predict.assert_awaited_once_with(message.lower())
+    mock_profanity_model.predict.assert_awaited_once_with(message)
     assert status_result.safety_code == SafetyCode.PROFANE
     assert status_result.status == status.HTTP_200_OK
     assert status_result.action == toxicity_policy.action
@@ -121,7 +121,7 @@ async def test_check_toxicity_above_threshold_observe(
 
     status_result, token_count = await check_toxicity(message, toxicity_policy_observe)
 
-    mock_profanity_model.predict.assert_awaited_once_with(message.lower())
+    mock_profanity_model.predict.assert_awaited_once_with(message)
     assert status_result.safety_code == SafetyCode.SAFE
     assert status_result.status == status.HTTP_200_OK
     assert status_result.action is None
@@ -143,7 +143,7 @@ async def test_check_toxicity_uses_default_threshold(
         message, toxicity_policy_no_threshold
     )
 
-    mock_profanity_model.predict.assert_awaited_once_with(message.lower())
+    mock_profanity_model.predict.assert_awaited_once_with(message)
     assert status_result.safety_code == SafetyCode.PROFANE
     assert status_result.action == toxicity_policy_no_threshold.action
 
@@ -191,7 +191,7 @@ async def test_check_toxicity_predict_exception(
 
     status_result, token_count = await check_toxicity(message, toxicity_policy)
 
-    mock_profanity_model.predict.assert_awaited_once_with(message.lower())
+    mock_profanity_model.predict.assert_awaited_once_with(message)
     assert status_result.safety_code == SafetyCode.UNEXPECTED
     assert status_result.status == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert status_result.action == Action.OVERRIDE.value

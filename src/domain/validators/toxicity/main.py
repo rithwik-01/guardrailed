@@ -26,7 +26,8 @@ async def check_toxicity(message: str, policy: Policy) -> Tuple[Status, int]:
     Raises:
         NotInitializedError: If the profanity model is not available.
     """
-    message = message.lower()
+    # Do not lowercase: s-nlp/roberta_toxicity_classifier is a cased model and
+    # casing carries signal (shouted abuse scores differently from lowercase).
     policy_message = getattr(policy, "message", "Toxicity detected.")
     try:
         model = app_state.profanity_model
