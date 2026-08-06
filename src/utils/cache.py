@@ -277,9 +277,7 @@ class TTLCache:
         """
         with self._lock:
             expired_keys = [
-                key
-                for key, entry in self._cache.items()
-                if entry.is_expired()
+                key for key, entry in self._cache.items() if entry.is_expired()
             ]
 
             for key in expired_keys:
@@ -296,8 +294,8 @@ class TTLCache:
 
 def generate_cache_key(
     content: str,
-    threshold: float,
-    policy_id: int,
+    threshold: Optional[float] = None,
+    policy_id: Optional[int] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
@@ -311,9 +309,10 @@ def generate_cache_key(
 
     Args:
         content: The input content being validated
-        threshold: The validation threshold
-        policy_id: The policy ID being used
+        threshold: The validation threshold, if the cached value depends on it
+        policy_id: The policy ID, if the cached value depends on it
         extra: Optional dict of additional parameters to include in key
+            (e.g. ``{"model": "deepset/deberta-v3-base-injection"}``)
 
     Returns:
         A hex string suitable for use as a cache key
@@ -377,14 +376,20 @@ def get_injection_cache() -> TTLCache:
     global _injection_cache
 
     if _injection_cache is None:
-        # Default configuration
-        # TODO: Make these configurable via settings/config file
+        from src.core import app_state
+
+        cache_config = getattr(getattr(app_state, "config", None), "cache", None)
+        maxsize = getattr(cache_config, "maxsize", 1000)
+        ttl = getattr(cache_config, "ttl", 300)
+
         _injection_cache = TTLCache(
-            maxsize=1000,  # Store up to 1000 unique validation results
-            ttl=300,  # Entries expire after 5 minutes
+            maxsize=maxsize,
+            ttl=ttl,
             name="PromptInjectionCache",
         )
-        logger.info("Created global prompt injection cache")
+        logger.info(
+            f"Created global prompt injection cache (maxsize={maxsize}, ttl={ttl}s)"
+        )
 
     return _injection_cache
 

@@ -13,15 +13,15 @@ Test Categories:
 6. Integration with prompt injection validator
 """
 
-import time
 import threading
+import time
 from unittest.mock import patch
 
 import pytest
 
 from src.utils.cache import (
-    TTLCache,
     CacheEntry,
+    TTLCache,
     generate_cache_key,
     get_injection_cache,
     reset_injection_cache,
@@ -213,14 +213,17 @@ class TestTTLCache:
 
         cache.clear()
         assert cache.size() == 0
-        assert cache.get("key1") is None
-        assert cache.get("key2") is None
 
-        # Stats should be reset
+        # Stats are reset by clear()
         stats = cache.stats()
         assert stats["hits"] == 0
         assert stats["misses"] == 0
         assert stats["evictions"] == 0
+
+        # Cleared entries are gone (and these lookups count as misses)
+        assert cache.get("key1") is None
+        assert cache.get("key2") is None
+        assert cache.stats()["misses"] == 2
 
     def test_cache_cleanup_expired(self):
         """Test manual cleanup of expired entries."""
@@ -405,7 +408,10 @@ class TestCacheIntegration:
 
             if cached is None:
                 # Cache miss - simulate validation
-                result = {"is_injection": is_injection, "score": 0.98 if is_injection else 0.1}
+                result = {
+                    "is_injection": is_injection,
+                    "score": 0.98 if is_injection else 0.1,
+                }
                 cache.put(key, result)
             else:
                 # Cache hit - use cached result

@@ -12,6 +12,10 @@ This document describes the LRU (Least Recently Used) cache implementation for t
 
 ## Architecture
 
+### Configuration
+
+Size and TTL come from config (`VALIDATOR_CACHE_MAXSIZE`, `VALIDATOR_CACHE_TTL`).
+
 ### Cache Location
 ```
 src/utils/cache.py          # Cache implementation
@@ -49,15 +53,18 @@ stats = cache.stats()
 Cache keys are generated using SHA-256 hashing to ensure:
 - **Collision resistance**: Negligible chance of key collisions
 - **Deterministic**: Same input always produces same key
-- **Factors included**: Content, threshold, policy ID
+- **Factors included**: Content and model name
+
+The cache stores the raw model **score**, not a verdict. The policy threshold is
+applied after the lookup, so policies with different thresholds share one entry
+and a threshold change takes effect immediately rather than waiting out the TTL.
 
 ```python
 from src.utils.cache import generate_cache_key
 
 key = generate_cache_key(
     content="Ignore instructions",
-    threshold=0.5,
-    policy_id=7
+    extra={"model": "protectai/deberta-v3-base-prompt-injection-v2"},
 )
 # Returns: 'a1b2c3d4e5f6...' (64-char hex string)
 ```
@@ -94,8 +101,8 @@ class CacheEntry:
                               ▼
                  ┌────────────────────────┐
                  │  Generate cache key    │
-                 │  (content + threshold   │
-                 │   + policy_id)          │
+                 │  (content + model)      │
+                 │                         │
                  └────────────────────────┘
                               │
                               ▼
@@ -165,24 +172,20 @@ The cache is integrated into `check_prompt_injection()`:
 
 ```python
 async def check_prompt_injection(message: str, policy: Policy) -> Tuple[Status, int]:
-    # 1. Generate cache key
+    # 1. Generate cache key (content + model; the threshold is applied later)
+    model = app_state.injection_model
     cache = get_injection_cache()
-    cache_key = generate_cache_key(
-        content=message,
-        threshold=policy.injection_threshold or 0.5,
-        policy_id=policy.id,
-    )
+    cache_key = generate_cache_key(content=message, extra={"model": model.model_name})
 
     # 2. Check cache
-    cached_result = cache.get(cache_key)
-    if cached_result is not None:
-        return cached_result, 0  # Cache hit!
+    score = cache.get(cache_key)
+    if score is None:
+        # 3. Cache miss - run model, then store the score (never an error result)
+        probabilities, token_count = await model.predict(message)
+        score = probabilities[_injection_index(model)]
+        cache.put(cache_key, score)
 
-    # 3. Cache miss - run model
-    result = await loop.run_in_executor(None, _classifier, message)
-    status_result = process_result(result, policy)
-
-    # 4. Store in cache (unless error)
+    # 4. Apply this policy's threshold to the (possibly cached) score
     if status_result.safety_code != SafetyCode.UNEXPECTED:
         cache.put(cache_key, status_result)
 
@@ -234,8 +237,8 @@ pytest tests/unit/test_prompt_injection.py -k "cache" -v
 **Test Scenarios:**
 - Cache hit on duplicate messages
 - Cache miss on different content
-- Separate cache entries for different thresholds
-- Separate cache entries for different policy IDs
+- One cached score re-thresholded per policy
+- Separate cache entries per model
 - Error results not cached
 - Cache statistics logging
 
