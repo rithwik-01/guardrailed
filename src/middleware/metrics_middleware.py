@@ -26,6 +26,23 @@ IN_PROGRESS = Gauge(
     "http_requests_in_progress", "Requests in progress", ["method", "endpoint"]
 )
 
+# Guardrail metrics: what the gateway actually decided, not just how fast it replied.
+GUARDRAIL_VIOLATIONS = Counter(
+    "guardrail_violations_total",
+    "Policy violations detected, by policy and resulting action",
+    ["policy_id", "policy_name", "safety_code", "action"],
+)
+GUARDRAIL_VALIDATION_LATENCY = Histogram(
+    "guardrail_validation_duration_seconds",
+    "Time spent running all policy checks for one request",
+    ["stage"],
+)
+GUARDRAIL_CACHE_HIT_RATE = Gauge(
+    "guardrail_cache_hit_rate",
+    "Validator result cache hit rate (0-1)",
+    ["cache"],
+)
+
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
     async def dispatch(
@@ -64,6 +81,11 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
 
 def metrics_endpoint(request: Request) -> StarletteResponse:
     """Endpoint that returns Prometheus metrics."""
+    from src.utils import get_injection_cache
+
+    GUARDRAIL_CACHE_HIT_RATE.labels(cache="prompt_injection").set(
+        get_injection_cache().stats()["hit_rate"]
+    )
     return StarletteResponse(
         content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST
     )
