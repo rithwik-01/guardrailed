@@ -50,6 +50,15 @@ async def cleanup_system() -> None:
         except Exception as e:
             logger.error(f"Error cleaning up profanity model: {e}", exc_info=True)
 
+    if app_state.injection_model:
+        logger.debug("Cleaning up injection model.")
+        try:
+            await app_state.injection_model.close()
+            app_state.injection_model = None
+            logger.info("Injection model cleaned up.")
+        except Exception as e:
+            logger.error(f"Error cleaning up injection model: {e}", exc_info=True)
+
     if app_state.ner_model:
         logger.debug("Cleaning up NER model.")
         try:

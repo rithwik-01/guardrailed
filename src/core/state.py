@@ -17,6 +17,7 @@ class AppState:
         self.config: Optional[AppConfig] = None
         self.shutdown_manager: Optional["ShutdownManager"] = None
         self.profanity_model: Optional["ClassificationModel"] = None
+        self.injection_model: Optional["ClassificationModel"] = None
         self.ner_model: Optional["NERModel"] = None
         self.presidio_analyzer_engine: Optional[AnalyzerEngine] = None
         self.presidio_anonymizer_engine: Optional[AnonymizerEngine] = None

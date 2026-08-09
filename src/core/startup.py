@@ -85,7 +85,7 @@ async def init_presidio_engines() -> None:
 
 async def init_transformer_models() -> None:
     """Initializes non-Presidio Transformer models (Toxicity, standalone NER)."""
-    if app_state.profanity_model or app_state.ner_model:
+    if app_state.profanity_model or app_state.ner_model or app_state.injection_model:
         logger.info("Standard Transformer models already initialized or skipped.")
         return
 
@@ -105,6 +105,20 @@ async def init_transformer_models() -> None:
         else:
             logger.warning(
                 "TOXICITY_MODEL_URL not configured. Skipping initialization."
+            )
+
+        if app_state.config.injection_model_url:
+            logger.info(
+                f"Initializing injection ClassificationModel from: {app_state.config.injection_model_url}"
+            )
+            app_state.injection_model = ClassificationModel(
+                app_state.config.injection_model_url
+            )
+            await app_state.injection_model.initialize()
+            logger.info("ClassificationModel (Prompt injection) initialized.")
+        else:
+            logger.warning(
+                "INJECTION_MODEL_URL not configured. Skipping initialization."
             )
 
         if app_state.config.ner_model_url:

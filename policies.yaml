@@ -37,6 +37,16 @@ policies:
     state: true
     threshold: 0.75
 
+  # Prompt Injection Check
+  - id: 7 # Corresponds to PolicyType.PROMPT_INJECTION
+    name: "Prompt Injection Check"
+    is_user_policy: true      # User input only; ignored for LLM output
+    is_llm_policy: false
+    action: 1 # Observe - see docs/EVALS.md before switching to Override
+    message: "Prompt injection attempt detected."
+    state: true
+    injection_threshold: 0.5
+
   # Competitor Check
   - id: 3 # Corresponds to PolicyType.COMPETITOR_CHECK
     name: "Competitor Check"

@@ -31,10 +31,12 @@ def mock_app_state():
     state.config = MagicMock(name="mock_config")
     state.config.toxicity_model_url = "mock/toxicity/model"
     state.config.ner_model_url = "mock/ner/model"
+    state.config.injection_model_url = "mock/injection/model"
     state.presidio_analyzer_engine = None
     state.presidio_anonymizer_engine = None
     state.profanity_model = None
     state.ner_model = None
+    state.injection_model = None
     return state
 
 
@@ -117,16 +119,21 @@ async def test_init_transformers_success_both(
 
     mock_app_state_obj.config.toxicity_model_url = "path/to/tox"
     mock_app_state_obj.config.ner_model_url = "path/to/ner"
+    mock_app_state_obj.config.injection_model_url = "path/to/injection"
     mock_app_state_obj.profanity_model = None
     mock_app_state_obj.ner_model = None
+    mock_app_state_obj.injection_model = None
 
     caplog.set_level(logging.INFO)
 
     await init_transformer_models()
 
-    mock_class_cls_patch.assert_called_once_with("path/to/tox")
-    mock_classification_model_instance.initialize.assert_awaited_once()
+    assert mock_class_cls_patch.call_count == 2
+    mock_class_cls_patch.assert_any_call("path/to/tox")
+    mock_class_cls_patch.assert_any_call("path/to/injection")
+    assert mock_classification_model_instance.initialize.await_count == 2
     assert mock_app_state_obj.profanity_model is mock_classification_model_instance
+    assert mock_app_state_obj.injection_model is mock_classification_model_instance
 
     mock_ner_cls_patch.assert_called_once_with("path/to/ner")
     mock_ner_model_instance.initialize.assert_awaited_once()
@@ -153,8 +160,10 @@ async def test_init_transformers_success_both_missing(
     """Test initialization when both model URLs are missing."""
     mock_app_state_obj.config.toxicity_model_url = None
     mock_app_state_obj.config.ner_model_url = None
+    mock_app_state_obj.config.injection_model_url = None
     mock_app_state_obj.profanity_model = None
     mock_app_state_obj.ner_model = None
+    mock_app_state_obj.injection_model = None
     caplog.set_level(logging.INFO)
 
     await init_transformer_models()
@@ -165,6 +174,8 @@ async def test_init_transformers_success_both_missing(
     mock_ner_model_instance.initialize.assert_not_awaited()
     assert mock_app_state_obj.profanity_model is None
     assert mock_app_state_obj.ner_model is None
+    assert mock_app_state_obj.injection_model is None
+    assert "INJECTION_MODEL_URL not configured. Skipping initialization." in caplog.text
 
     assert "TOXICITY_MODEL_URL not configured. Skipping initialization." in caplog.text
     assert (

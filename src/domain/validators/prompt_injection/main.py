@@ -1,45 +1,61 @@
-import asyncio
 import logging
 from typing import Tuple
 
-import torch
-from transformers import pipeline
-
 from fastapi import status
 
+from src.core import app_state
+from src.domain.transformers import ClassificationModel
+from src.exceptions import NotInitializedError
 from src.shared import Action, Policy, Result, SafetyCode, Status
 from src.utils import generate_cache_key, get_injection_cache
 
 logger = logging.getLogger(__name__)
 
-# Load the model as a module-level singleton
-_classifier = pipeline(
-    "text-classification",
-    model="deepset/deberta-v3-base-injection",
-    truncation=True,
-    max_length=512,
-    device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-)
+# Label names used by the common injection classifiers for the positive class.
+_INJECTION_LABEL_HINTS = ("inject", "jailbreak", "unsafe")
+_DEFAULT_INJECTION_INDEX = 1
+_injection_index_cache: dict[str, int] = {}
+
+
+def _injection_index(model: ClassificationModel) -> int:
+    """
+    Resolve which softmax index carries the INJECTION probability.
+
+    Different checkpoints label their classes differently (INJECTION/LEGIT,
+    INJECTION/SAFE, LABEL_1/LABEL_0), so read it off the model config rather than
+    assuming index 1 and silently inverting the guardrail on a model swap.
+    """
+    cached = _injection_index_cache.get(model.model_name)
+    if cached is not None:
+        return cached
+
+    index = _DEFAULT_INJECTION_INDEX
+    id2label = getattr(getattr(model.model, "config", None), "id2label", None)
+    if isinstance(id2label, dict):
+        for label_id, label in id2label.items():
+            if isinstance(label, str) and any(
+                hint in label.lower() for hint in _INJECTION_LABEL_HINTS
+            ):
+                index = int(label_id)
+                break
+        else:
+            logger.warning(
+                f"No injection-like label found in {model.model_name} "
+                f"({id2label}). Falling back to index {index}."
+            )
+
+    _injection_index_cache[model.model_name] = index
+    return index
 
 
 async def check_prompt_injection(message: str, policy: Policy) -> Tuple[Status, int]:
     """
     Checks message content for prompt injection attempts.
 
-    This function implements a caching layer to avoid redundant model inference
-    for identical content. Cache keys are generated based on message content,
-    threshold, and policy ID to ensure correctness.
-
-    Cache Behavior:
-        - Hit: Returns cached result without model inference (fast path)
-        - Miss: Runs model inference and caches result (slow path)
-        - TTL: Cached entries expire after 5 minutes (configurable)
-        - Size: Cache holds up to 1000 entries (configurable)
-
-    Performance Characteristics:
-        - Cache hit: ~0.1ms (dict lookup)
-        - Cache miss: ~50-200ms (model inference)
-        - Target hit rate: >70% for typical workloads
+    The model score is cached per (model, content) so that repeated content skips
+    inference entirely. The policy threshold is applied *after* the cache lookup,
+    which means policies with different thresholds share one cache entry and a
+    threshold change takes effect immediately instead of waiting out the TTL.
 
     Args:
         message: The text content to check.
@@ -48,82 +64,71 @@ async def check_prompt_injection(message: str, policy: Policy) -> Tuple[Status, 
     Returns:
         A tuple containing:
             - Status: Indicates SAFE or INJECTION_DETECTED, including action and message.
-            - int: The token count of the processed message (always 0 for this validator).
+            - int: The token count of the processed message (0 on a cache hit).
+
+    Raises:
+        NotInitializedError: If the injection model is not available.
     """
     policy_message = getattr(policy, "message", "Prompt injection detected.")
-    threshold = 0.5
-    if policy.injection_threshold is not None:
-        threshold = policy.injection_threshold
+    threshold = (
+        policy.injection_threshold if policy.injection_threshold is not None else 0.5
+    )
 
-    # CHECK CACHE FIRST
-    # Generate a cache key based on content, threshold, and policy ID
-    # This ensures that different thresholds or policies don't share cache entries
+    model = app_state.injection_model
+    if model is None:
+        logger.error("Injection model not initialized during check")
+        raise NotInitializedError("Prompt injection model")
+
     cache = get_injection_cache()
-    cache_key = generate_cache_key(
-        content=message,
-        threshold=threshold,
-        policy_id=policy.id,
-    )
-
-    # Try to get cached result
-    cached_result = cache.get(cache_key)
-    if cached_result is not None:
-        # Cache hit - return cached Status object
-        # The cached Status already contains the correct safety_code and action
-        logger.debug(
-            f"Prompt injection cache HIT for policy {policy.id} "
-            f"(threshold: {threshold}, cache stats: {cache.stats()})"
-        )
-        return cached_result, 0
-
-    # Cache miss - need to run model inference
-    logger.debug(
-        f"Prompt injection cache MISS for policy {policy.id} "
-        f"(threshold: {threshold}, cache stats: {cache.stats()})"
-    )
+    cache_key = generate_cache_key(content=message, extra={"model": model.model_name})
+    token_count = 0
 
     try:
-        # Run inference in executor to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _classifier, message)
+        score = cache.get(cache_key)
+        if score is None:
+            probabilities, token_count = await model.predict(message)
+            score = probabilities[_injection_index(model)]
+            cache.put(cache_key, score)
+            logger.debug(
+                f"Prompt injection cache MISS for policy {policy.id} "
+                f"(score: {score:.4f}, cache stats: {cache.stats()})"
+            )
+        else:
+            logger.debug(
+                f"Prompt injection cache HIT for policy {policy.id} "
+                f"(score: {score:.4f}, cache stats: {cache.stats()})"
+            )
 
-        # The pipeline returns a list of dicts like [{'label': 'INJECTION', 'score': 0.98}]
-        if isinstance(result, list) and len(result) > 0:
-            prediction = result[0]
-            label = prediction.get("label", "")
-            score = prediction.get("score", 0.0)
-
-            is_injection = label == "INJECTION" and score >= threshold
-
-            if is_injection:
-                logger.warning(
-                    f"Prompt injection detected with score {score:.4f} (threshold: {threshold}) for policy {policy.id}. Action: {Action(policy.action).name}"
-                )
-                status_result = Result.unsafe_result(
+        if score >= threshold:
+            logger.warning(
+                f"Prompt injection detected with score {score:.4f} "
+                f"(threshold: {threshold}) for policy {policy.id}. "
+                f"Action: {Action(policy.action).name}"
+            )
+            return (
+                Result.unsafe_result(
                     message=policy_message,
                     safety_code=SafetyCode.INJECTION_DETECTED,
                     action=policy.action,
-                )
-                # Cache the result
-                cache.put(cache_key, status_result)
-                return status_result, 0
+                ),
+                token_count,
+            )
 
-        # If we get here, either no injection or below threshold
-        status_result = Result.safe_result()
-        # Cache the safe result
-        cache.put(cache_key, status_result)
-        return status_result, 0
+        return Result.safe_result(), token_count
 
+    except NotInitializedError:
+        raise
     except Exception as e:
         logger.error(
             f"Error during prompt injection check for policy {policy.id}: {e}",
             exc_info=True,
         )
-        status_result = Result.unsafe_result(
-            message="Internal error during prompt injection check.",
-            safety_code=SafetyCode.UNEXPECTED,
-            action=Action.OVERRIDE.value,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return (
+            Result.unsafe_result(
+                message="Internal error during prompt injection check.",
+                safety_code=SafetyCode.UNEXPECTED,
+                action=Action.OVERRIDE.value,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            ),
+            token_count,
         )
-        # Don't cache error results - they might be transient
-        return status_result, 0
