@@ -6,25 +6,31 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import status
 
 from src.core import app_state
+from src.core.config import ValidationConfig
 from src.domain.validators.context import ValidationContext
 from src.exceptions import NotInitializedError
+from src.middleware.metrics_middleware import GUARDRAIL_VIOLATIONS
 from src.shared import Action, Agent, Policy, PolicyType, Result, SafetyCode, Status
-from src.utils import chunk_text_by_char
+from src.utils import chunk_text_by_char, extract_text_content, sanitize_for_detection
 
 from .ner import check_competitors, check_locations, check_persons
 from .pii_leakage import check_pii
-from .prompt_leakage import check_prompt
 from .prompt_injection import check_prompt_injection
+from .prompt_leakage import check_prompt
 from .toxicity import check_toxicity
 from .types import ContentMessage
 
 logger = logging.getLogger(__name__)
 
-assert app_state.config is not None, "app_state.config must be initialized"
 
-ENABLE_CHUNKING = app_state.config.validation.enable_chunking
-MAX_CHUNK_CHARS = app_state.config.validation.max_chunk_chars
-CHUNK_OVERLAP_CHARS = app_state.config.validation.chunk_overlap_chars
+def _validation_config() -> ValidationConfig:
+    """Read validation settings at call time.
+
+    Reading them at import time made importing this module fail whenever config
+    had not been loaded yet (scripts, evals, standalone tooling).
+    """
+    config = getattr(app_state, "config", None)
+    return config.validation if config is not None else ValidationConfig()
 
 
 class ContentValidator:
@@ -55,17 +61,40 @@ class ContentValidator:
         request_id = getattr(asyncio.current_task(), "request_id", "unknown-validator")
         role_messages: Dict[str, List[Tuple[Dict, ContentMessage]]] = {}
         valid_messages_count = 0
-        for raw_message in self.messages:
+        for message_index, raw_message in enumerate(self.messages):
             role = raw_message.get("role")
-            content = raw_message.get("content")
-            if not isinstance(role, str) or not isinstance(content, str):
+            raw_content = raw_message.get("content")
+            if not isinstance(role, str):
+                continue
+            if raw_content is None:
+                # Valid provider shape (e.g. an assistant message carrying only
+                # tool_calls). Nothing to scan.
+                continue
+            content = extract_text_content(raw_content)
+            if content is None:
+                # Unreadable content shape: we cannot scan it, so we refuse it
+                # rather than forwarding it unchecked.
+                logger.warning(
+                    f"Unsupported content type {type(raw_content)} for role '{role}'. "
+                    "Failing closed.",
+                    extra={"request_id": request_id},
+                )
+                return Status(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    message="Unsupported message content format.",
+                    safety_code=SafetyCode.GENERIC_UNSAFE,
+                    action=Action.OVERRIDE.value,
+                )
+            if not content:
                 continue
             if role not in [Agent.USER, Agent.ASSISTANT, Agent.SYSTEM]:
                 role = Agent.ASSISTANT
             if role not in role_messages:
                 role_messages[role] = []
             content_message = ContentMessage(
-                content=content, user_id=raw_message.get("user_id")
+                content=content,
+                user_id=raw_message.get("user_id"),
+                index=message_index,
             )
             role_messages[role].append((raw_message, content_message))
             valid_messages_count += 1
@@ -126,6 +155,7 @@ class ContentValidator:
         user_id: Optional[str],
         message_was_chunked: bool,
         request_id: str,
+        message_index: int = 0,
     ) -> Optional[Status]:
         """
         Runs applicable policy checks on the given text chunk or full message.
@@ -138,6 +168,24 @@ class ContentValidator:
             "request_id": request_id,
             "role": role,
         }
+
+        # Character-injection defense: strip invisible/tag/bidi characters and fold
+        # cross-script homoglyphs before any detector sees the text. Without this,
+        # zero-width and lookalike characters slip payloads past every classifier
+        # (arXiv:2504.11168). Detection-only - the original text is what gets
+        # forwarded upstream.
+        validation_config = _validation_config()
+        if validation_config.normalize_unicode:
+            sanitized = sanitize_for_detection(
+                text_to_check, fold_homoglyphs=validation_config.fold_homoglyphs
+            )
+            if sanitized != text_to_check:
+                logger.info(
+                    "Input normalized before validation "
+                    f"({len(text_to_check)} -> {len(sanitized)} chars).",
+                    extra=log_extra_run,
+                )
+            text_to_check = sanitized
 
         if ner_is_needed:
             if app_state.ner_model:
@@ -199,6 +247,7 @@ class ContentValidator:
                     elif policy_type in [
                         PolicyType.PROMPT_LEAKAGE,
                         PolicyType.PROFANITY,
+                        PolicyType.PROMPT_INJECTION,
                     ]:
                         coro = handler(temp_content_message, policy)  # type: ignore[operator]
                     else:
@@ -251,7 +300,27 @@ class ContentValidator:
                     result_status: Status = await task
 
                     if result_status.safety_code != SafetyCode.SAFE:
-                        if policy.action == Action.OBSERVE.value:
+                        GUARDRAIL_VIOLATIONS.labels(
+                            policy_id=str(policy.id),
+                            policy_name=policy.name,
+                            safety_code=str(result_status.safety_code),
+                            action=Action(policy.action).name,
+                        ).inc()
+                        if (
+                            policy.action == Action.REDACT.value
+                            and result_status.processed_content is not None
+                        ):
+                            # Redaction is not a block: record the replacement text
+                            # and let the (redacted) request continue.
+                            self.context.redactions[message_index] = (
+                                result_status.processed_content
+                            )
+                            logger.info(
+                                f"Redacted content for policy {policy.id} "
+                                f"({policy.name}) on message {message_index}.",
+                                extra=log_extra_run,
+                            )
+                        elif policy.action == Action.OBSERVE.value:
                             logger.info(
                                 f"Observed violation for policy {policy.id} ({policy.name}). Message: '{result_status.message}'. Allowing request/chunk.",
                                 extra=log_extra_run,
@@ -390,12 +459,18 @@ class ContentValidator:
                 "content_length": len(original_content),
             }
 
-            should_chunk = ENABLE_CHUNKING and len(original_content) > MAX_CHUNK_CHARS
+            validation_config = _validation_config()
+            should_chunk = (
+                validation_config.enable_chunking
+                and len(original_content) > validation_config.max_chunk_chars
+            )
 
             if should_chunk:
                 message_was_chunked = True
                 text_chunks = chunk_text_by_char(
-                    original_content, MAX_CHUNK_CHARS, CHUNK_OVERLAP_CHARS
+                    original_content,
+                    validation_config.max_chunk_chars,
+                    validation_config.chunk_overlap_chars,
                 )
                 logger.info(
                     f"Processing long message in {len(text_chunks)} chunks.",
@@ -421,6 +496,7 @@ class ContentValidator:
                         user_id=content_message.user_id,
                         message_was_chunked=message_was_chunked,
                         request_id=request_id,
+                        message_index=content_message.index,
                     )
 
                     if chunk_status is not None:
@@ -452,6 +528,7 @@ class ContentValidator:
                     user_id=content_message.user_id,
                     message_was_chunked=message_was_chunked,
                     request_id=request_id,
+                    message_index=content_message.index,
                 )
                 if final_status_for_message is not None:
                     action_name = (

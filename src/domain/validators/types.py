@@ -19,6 +19,7 @@ class ContentMessage:
 
     content: str
     user_id: Optional[str] = None
+    index: int = 0
     token_count: int = 0
     policy_violations: List[PolicyType] = field(default_factory=list)
 
