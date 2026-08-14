@@ -79,7 +79,7 @@ async def test_validate_messages_safe(
     mock_content_validator.validate_content.return_value = Result.safe_result()
     mock_validator_cls.return_value = mock_content_validator
 
-    result = await _validate_messages(
+    result, _ = await _validate_messages(
         messages_to_validate=sample_messages,
         policies=sample_policies,
         user_id="u1",
@@ -110,7 +110,7 @@ async def test_validate_messages_policy_violation(
     mock_content_validator.validate_content.return_value = unsafe_status
     mock_validator_cls.return_value = mock_content_validator
 
-    result = await _validate_messages(
+    result, _ = await _validate_messages(
         messages_to_validate=sample_messages,
         policies=sample_policies,
         user_id="u1",
@@ -142,7 +142,7 @@ async def test_validate_messages_internal_error_status(
     mock_content_validator.validate_content.return_value = internal_error_status
     mock_validator_cls.return_value = mock_content_validator
 
-    result = await _validate_messages(
+    result, _ = await _validate_messages(
         messages_to_validate=sample_messages,
         policies=sample_policies,
         user_id="u1",
@@ -215,7 +215,7 @@ async def test_validate_messages_unexpected_exception(
     )
     mock_validator_cls.return_value = mock_content_validator
 
-    result = await _validate_messages(
+    result, _ = await _validate_messages(
         messages_to_validate=sample_messages,
         policies=sample_policies,
         user_id="u1",
@@ -419,3 +419,73 @@ def test_create_blocked_response_unsupported(mock_logger):
     assert (
         "Unsupported provider 'unknown_provider'" in mock_logger.error.call_args[0][0]
     )
+
+
+# ============================================================================
+# Redaction forwarding (Action.REDACT)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@patch("src.presentation.proxy_utils.ContentValidator")
+async def test_validate_messages_applies_redactions(mock_validator_cls):
+    """A redacting policy yields the rewritten messages, not a block."""
+
+    async def fake_validate(self=None):
+        context = mock_validator_cls.call_args.args[0]
+        context.redactions[1] = "my email is <EMAIL_ADDRESS>"
+        return Result.safe_result()
+
+    mock_validator_cls.return_value.validate_content = AsyncMock(
+        side_effect=fake_validate
+    )
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "my email is a@example.com"},
+    ]
+
+    result, final_messages = await _validate_messages(
+        messages_to_validate=messages,
+        policies=[],
+        user_id=None,
+        request_id="req-redact",
+        validation_stage="input",
+        allow_redaction=True,
+    )
+
+    assert result is None
+    assert final_messages[0] == messages[0]
+    assert final_messages[1]["content"] == "my email is <EMAIL_ADDRESS>"
+    # The caller's list is not mutated.
+    assert messages[1]["content"] == "my email is a@example.com"
+
+
+@pytest.mark.asyncio
+@patch("src.presentation.proxy_utils.ContentValidator")
+async def test_validate_messages_blocks_redaction_when_not_supported(
+    mock_validator_cls,
+):
+    """Routes that cannot forward redacted content must fail closed."""
+
+    async def fake_validate(self=None):
+        context = mock_validator_cls.call_args.args[0]
+        context.redactions[0] = "<EMAIL_ADDRESS>"
+        return Result.safe_result()
+
+    mock_validator_cls.return_value.validate_content = AsyncMock(
+        side_effect=fake_validate
+    )
+
+    result, final_messages = await _validate_messages(
+        messages_to_validate=[{"role": "user", "content": "a@example.com"}],
+        policies=[],
+        user_id=None,
+        request_id="req-redact-block",
+        validation_stage="input",
+        allow_redaction=False,
+    )
+
+    assert result is not None
+    assert result.safety_code == SafetyCode.PII_DETECTED
+    assert result.action == Action.OVERRIDE.value
+    assert final_messages[0]["content"] == "a@example.com"

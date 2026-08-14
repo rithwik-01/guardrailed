@@ -192,3 +192,75 @@ async def test_check_pii_analyzer_exception(mock_analyzer_engine, pii_policy_def
     result = await check_pii(prompt, pii_policy_default)
     assert result.safety_code == SafetyCode.UNEXPECTED
     assert result.status == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# Redaction (Action.REDACT)
+# ============================================================================
+
+
+@pytest.fixture
+def pii_policy_redact(pii_policy_entities):
+    """PII policy configured to redact rather than block."""
+    policy = pii_policy_entities.model_copy()
+    policy.action = Action.REDACT.value
+    policy.message = "PII redacted."
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_check_pii_redacts_detected_entities(
+    patch_app_state_for_pii, mock_analyzer_engine, pii_policy_redact
+):
+    """REDACT returns the anonymized text so the caller can forward it."""
+    findings = [
+        RecognizerResult(entity_type="EMAIL_ADDRESS", start=13, end=29, score=0.9)
+    ]
+    mock_analyzer_engine.analyze.return_value = findings
+
+    anonymizer = MagicMock()
+    anonymizer.anonymize.return_value = MagicMock(text="My email is <EMAIL_ADDRESS>")
+    patch_app_state_for_pii.presidio_anonymizer_engine = anonymizer
+
+    result = await check_pii("My email is a@example.com", pii_policy_redact)
+
+    anonymizer.anonymize.assert_called_once()
+    assert result.safety_code == SafetyCode.PII_DETECTED
+    assert result.action == Action.REDACT.value
+    assert result.processed_content == "My email is <EMAIL_ADDRESS>"
+    assert result.status == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_check_pii_redact_fails_closed_without_anonymizer(
+    patch_app_state_for_pii, mock_analyzer_engine, pii_policy_redact
+):
+    """If redaction is impossible, block rather than forward the raw content."""
+    mock_analyzer_engine.analyze.return_value = [
+        RecognizerResult(entity_type="EMAIL_ADDRESS", start=0, end=5, score=0.9)
+    ]
+    patch_app_state_for_pii.presidio_anonymizer_engine = None
+
+    result = await check_pii("a@example.com", pii_policy_redact)
+
+    assert result.safety_code == SafetyCode.PII_DETECTED
+    assert result.action == Action.OVERRIDE.value
+    assert result.processed_content is None
+    assert result.status == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_check_pii_redact_fails_closed_when_anonymizer_raises(
+    patch_app_state_for_pii, mock_analyzer_engine, pii_policy_redact
+):
+    mock_analyzer_engine.analyze.return_value = [
+        RecognizerResult(entity_type="EMAIL_ADDRESS", start=0, end=5, score=0.9)
+    ]
+    anonymizer = MagicMock()
+    anonymizer.anonymize.side_effect = Exception("anonymizer exploded")
+    patch_app_state_for_pii.presidio_anonymizer_engine = anonymizer
+
+    result = await check_pii("a@example.com", pii_policy_redact)
+
+    assert result.action == Action.OVERRIDE.value
+    assert result.processed_content is None

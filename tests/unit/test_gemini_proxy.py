@@ -82,9 +82,8 @@ CREATE_BLOCKED_RESPONSE_PATH = (
 HTTP_CLIENT_POST_PATH = "src.presentation.proxy_utils.http_client.post"
 
 
-@pytest.mark.usefixtures("mock_app_state_for_proxy")
 @pytest.fixture(scope="function")
-def mock_httpx_post():
+def mock_httpx_post(mock_app_state_for_proxy):
     with patch(HTTP_CLIENT_POST_PATH, new_callable=AsyncMock) as mock_post:
         mock_post.reset_mock(return_value=True, side_effect=True)
         yield mock_post
@@ -95,7 +94,7 @@ def mock_httpx_post():
     "mock_app_state_for_proxy",
 )
 class TestGeminiProxy:
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_gemini_proxy_success(
         self,
         mock_validate: AsyncMock,
@@ -130,7 +129,7 @@ class TestGeminiProxy:
     @patch(
         VALIDATE_MESSAGES_PATH,
         new_callable=AsyncMock,
-        return_value=UNSAFE_STATUS_BLOCK_FROM_VALIDATOR,
+        return_value=(UNSAFE_STATUS_BLOCK_FROM_VALIDATOR, []),
     )
     def test_gemini_proxy_input_blocked(
         self,
@@ -172,7 +171,7 @@ class TestGeminiProxy:
     @patch(
         VALIDATE_MESSAGES_PATH,
         new_callable=AsyncMock,
-        side_effect=[None, UNSAFE_STATUS_BLOCK_FROM_VALIDATOR],
+        side_effect=[(None, []), (UNSAFE_STATUS_BLOCK_FROM_VALIDATOR, [])],
     )
     def test_gemini_proxy_output_blocked(
         self,
@@ -239,7 +238,7 @@ class TestGeminiProxy:
     @patch(
         VALIDATE_MESSAGES_PATH,
         new_callable=AsyncMock,
-        return_value=INTERNAL_ERROR_STATUS_FROM_VALIDATOR,
+        return_value=(INTERNAL_ERROR_STATUS_FROM_VALIDATOR, []),
     )
     def test_gemini_proxy_validation_internal_error(
         self,
@@ -265,7 +264,7 @@ class TestGeminiProxy:
         mock_validate.assert_called_once()
         mock_httpx_post.assert_not_called()
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_gemini_proxy_backend_api_error(
         self,
         mock_validate: AsyncMock,
@@ -316,7 +315,7 @@ class TestGeminiProxy:
         mock_httpx_post.assert_called_once()
         mock_backend_response.raise_for_status.assert_called_once()
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_gemini_proxy_backend_network_error(
         self,
         mock_validate: AsyncMock,

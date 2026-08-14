@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from src.core import app_state
 from src.exceptions import (
     AuthenticationError,
-    NotInitializedError,
     GuardrailedHTTPException,
+    NotInitializedError,
     ValidationError,
 )
 from src.presentation.dependencies import get_loaded_policies
@@ -21,7 +21,7 @@ from src.presentation.proxy_utils import (
     create_blocked_response,
     http_client,
 )
-from src.shared import Action, Agent, Policy, SafetyCode, Status
+from src.shared import Action, Agent, Policy, SafetyCode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def _extract_gemini_api_key(request: Request) -> Optional[str]:
 
 
 def _extract_input_messages_from_gemini(
-    request_data: Dict[str, Any]
+    request_data: Dict[str, Any],
 ) -> List[Dict[str, str]]:
     """Converts Gemini's 'contents' structure to Guardrailed's message list for validation."""
     messages = []
@@ -76,7 +76,7 @@ def _extract_input_messages_from_gemini(
 
 
 def _extract_output_message_from_gemini(
-    response_data: Dict[str, Any]
+    response_data: Dict[str, Any],
 ) -> Optional[Dict[str, str]]:
     """Extracts the primary text response from Gemini's output structure."""
     try:
@@ -163,7 +163,7 @@ async def gemini_generate_content_proxy(
             f"Validating {len(input_messages)} input messages.", extra=log_extra
         )
 
-        input_validation_status: Optional[Status] = await _validate_messages(
+        input_validation_status, _ = await _validate_messages(
             messages_to_validate=input_messages,
             policies=loaded_policies,
             user_id=user_id,
@@ -258,7 +258,7 @@ async def gemini_generate_content_proxy(
 
         if llm_output_message:
             logger.debug("Validating Gemini output message.", extra=log_extra)
-            output_validation_status: Optional[Status] = await _validate_messages(
+            output_validation_status, _ = await _validate_messages(
                 messages_to_validate=[llm_output_message],
                 policies=loaded_policies,
                 user_id=user_id,
@@ -355,7 +355,8 @@ async def gemini_generate_content_proxy(
         raise client_err
     except GuardrailedHTTPException as http_exc:
         logger.warning(
-            f"GuardrailedHTTPException in Gemini proxy: {http_exc.detail}", extra=log_extra
+            f"GuardrailedHTTPException in Gemini proxy: {http_exc.detail}",
+            extra=log_extra,
         )
         raise http_exc
     except Exception as e:

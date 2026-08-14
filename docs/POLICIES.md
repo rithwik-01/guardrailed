@@ -58,6 +58,15 @@ A policy is a rule that Guardrailed evaluates for each message passing through t
 |-------|------|---------|-------------|
 | injection_threshold | float | 0.5 | Minimum confidence score on the INJECTION label to trigger a violation. |
 
+The classifier is set by `INJECTION_MODEL_URL` and defaults to
+`protectai/deberta-v3-base-prompt-injection-v2`. This policy applies to user input
+only; it is skipped for LLM output regardless of `is_llm_policy`.
+
+**Start it in OBSERVE.** Measured on a benign corpus containing injection trigger
+words, the default model flags 13% of legitimate prompts, and raising the threshold
+does not meaningfully reduce that. Run with `action: 1`, review what it flags against
+your own traffic, then decide whether to enforce. See [EVALS.md](./EVALS.md).
+
 ## Reference tables
 
 ### Policy types
@@ -78,8 +87,29 @@ A policy is a rule that Guardrailed evaluates for each message passing through t
 |-------|------|-------------|
 | 0 | OVERRIDE | Block the interaction and return a modified response body |
 | 1 | OBSERVE | Log the violation but allow the interaction to proceed |
-| 2 | REDACT | Modify content to remove detected violations |
+| 2 | REDACT | Replace detected entities with placeholders and let the request through |
 | 3 | RETRY | Suggest a retry for internal errors |
+
+#### REDACT
+
+`action: 2` is implemented for the PII policy. Detected entities are replaced with
+`<ENTITY_TYPE>` placeholders by the Presidio anonymizer and the request proceeds with
+the redacted text instead of being blocked.
+
+Where redaction applies:
+
+| Route | Behavior with `action: 2` |
+|---|---|
+| `/v1/chat/completions` (OpenAI) | Redacted content is forwarded upstream, and redacted LLM output is returned to the caller |
+| `/safeguard` | Response includes a `processed_messages` array with the redacted messages |
+| Gemini and Claude proxies | Redaction cannot be mapped back onto those payload shapes, so a redaction **blocks** instead (fails closed) |
+
+Redaction is also refused, and the request blocked, when:
+
+- the message was long enough to be chunked (character offsets are not reliable across chunks), or
+- the anonymizer is unavailable or errors.
+
+In both cases the gateway blocks rather than forwarding unredacted content.
 
 ### Safety codes
 

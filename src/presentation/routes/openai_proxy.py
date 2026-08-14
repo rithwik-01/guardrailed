@@ -92,12 +92,15 @@ async def openai_chat_completions_proxy(
             f"Validating {len(input_messages)} input messages.", extra=log_extra
         )
 
-        input_status: Optional[Status] = await proxy_utils._validate_messages(
+        input_status: Optional[Status]
+        validated_messages: List[Dict[str, Any]]
+        input_status, validated_messages = await proxy_utils._validate_messages(
             messages_to_validate=input_messages,
             policies=loaded_policies,
             user_id=user_id,
             request_id=request_id,
             validation_stage="input",
+            allow_redaction=True,
         )
 
         if input_status:
@@ -133,6 +136,12 @@ async def openai_chat_completions_proxy(
                 safety_code=SafetyCode.UNEXPECTED,
                 action=Action.OVERRIDE.value,
             )
+
+        if validated_messages is not input_messages:
+            logger.info(
+                "Forwarding request with redacted message content.", extra=log_extra
+            )
+            request_data = {**request_data, "messages": validated_messages}
 
         logger.debug("Forwarding request to OpenAI", extra=log_extra)
 
@@ -196,12 +205,15 @@ async def openai_chat_completions_proxy(
                 )
 
         if llm_msg:
-            output_status: Optional[Status] = await proxy_utils._validate_messages(
+            output_status: Optional[Status]
+            validated_output: List[Dict[str, Any]]
+            output_status, validated_output = await proxy_utils._validate_messages(
                 messages_to_validate=[llm_msg],
                 policies=loaded_policies,
                 user_id=user_id,
                 request_id=request_id,
                 validation_stage="output",
+                allow_redaction=True,
             )
 
             if output_status:
@@ -230,6 +242,19 @@ async def openai_chat_completions_proxy(
                     original_request_data=request_data,
                     original_response_data=openai_response_data,
                 )
+
+            if validated_output and validated_output[0] is not llm_msg:
+                logger.info(
+                    "Returning response with redacted content.", extra=log_extra
+                )
+                choices = openai_response_data["choices"]
+                openai_response_data = {
+                    **openai_response_data,
+                    "choices": [
+                        {**choices[0], "message": validated_output[0]},
+                        *choices[1:],
+                    ],
+                }
         else:
             if (
                 backend_response is not None

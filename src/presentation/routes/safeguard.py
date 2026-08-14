@@ -72,13 +72,23 @@ async def safeguard_messages(
         content_validator = ContentValidator(context)
         validation_status: Status = await content_validator.validate_content()
 
-        response_content = {
+        response_content: dict = {
             "safety_code": validation_status.safety_code,
             "message": validation_status.message,
             "action": validation_status.action,
         }
-        if validation_status.processed_content is not None:
-            response_content["processed_content"] = validation_status.processed_content
+        if context.redactions:
+            # Action.REDACT fired: hand back the messages with detected entities
+            # replaced, so the caller can forward those instead of the originals.
+            response_content["processed_messages"] = [
+                (
+                    {**message, "content": context.redactions[index]}
+                    if index in context.redactions
+                    else message
+                )
+                for index, message in enumerate(messages)
+            ]
+            response_content["action"] = Action.REDACT.value
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         action_name = (

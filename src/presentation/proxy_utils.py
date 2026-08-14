@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import status
@@ -11,6 +11,7 @@ from src.exceptions import (
     NotInitializedError,
     ValidationError,
 )
+from src.middleware.metrics_middleware import GUARDRAIL_VALIDATION_LATENCY
 from src.shared import Action, Policy, SafetyCode, Status
 
 http_client = httpx.AsyncClient(timeout=60.0)
@@ -23,25 +24,45 @@ HEADER_ANTHROPIC_API_KEY = "X-Api-Key"
 HEADER_ANTHROPIC_VERSION = "anthropic-version"
 
 
+def _apply_redactions(
+    messages: List[Dict[str, str]], redactions: Dict[int, str]
+) -> List[Dict[str, str]]:
+    """Return a new message list with redacted text substituted in."""
+    return [
+        {**message, "content": redactions[index]} if index in redactions else message
+        for index, message in enumerate(messages)
+    ]
+
+
 async def _validate_messages(
     messages_to_validate: List[Dict[str, str]],
     policies: List[Policy],
     user_id: Optional[str],
     request_id: str,
     validation_stage: str,
-) -> Optional[Status]:
+    allow_redaction: bool = False,
+) -> Tuple[Optional[Status], List[Dict[str, str]]]:
     """
     Helper to run validation and return Status if unsafe.
     Determines appropriate HTTP status code hint within the Status object.
-    Returns None if validation passes.
     Raises exceptions for validation dependency errors.
+
+    Args:
+        allow_redaction: whether the caller can forward redacted content. Callers
+            that cannot map redactions back onto their provider payload must
+            leave this False, in which case a redaction becomes a block rather
+            than silently forwarding unredacted content.
+
+    Returns:
+        (status, messages) - status is None when validation passes; messages is
+        the list to forward, with any Action.REDACT replacements applied.
     """
     if not messages_to_validate:
         helper_logger.debug(
             f"No messages to validate for stage: {validation_stage}",
             extra={"request_id": request_id},
         )
-        return None
+        return None, messages_to_validate
 
     context = ValidationContext(
         policies=policies, messages=messages_to_validate, user_id=user_id
@@ -49,7 +70,31 @@ async def _validate_messages(
     content_validator = ContentValidator(context)
 
     try:
-        validation_status: Status = await content_validator.validate_content()
+        with GUARDRAIL_VALIDATION_LATENCY.labels(stage=validation_stage).time():
+            validation_status: Status = await content_validator.validate_content()
+
+        if context.redactions and not allow_redaction:
+            helper_logger.warning(
+                f"Redaction requested at stage '{validation_stage}' but this route "
+                "cannot forward redacted content. Blocking instead.",
+                extra={"request_id": request_id},
+            )
+            return (
+                Status(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    message="Sensitive content detected.",
+                    safety_code=SafetyCode.PII_DETECTED,
+                    action=Action.OVERRIDE.value,
+                ),
+                messages_to_validate,
+            )
+
+        final_messages = (
+            _apply_redactions(messages_to_validate, context.redactions)
+            if context.redactions
+            else messages_to_validate
+        )
+
         if validation_status.safety_code != SafetyCode.SAFE:
             final_status_code = validation_status.status
             if not (500 <= final_status_code < 600):
@@ -77,13 +122,13 @@ async def _validate_messages(
                 f"Validation failed at stage '{validation_stage}'. Code: {unsafe_status_with_code.safety_code}, Msg: {unsafe_status_with_code.message}, HTTP Status Hint: {final_status_code}",
                 extra={"request_id": request_id},
             )
-            return unsafe_status_with_code
+            return unsafe_status_with_code, final_messages
         else:
             helper_logger.debug(
                 f"Validation successful for stage: {validation_stage}",
                 extra={"request_id": request_id},
             )
-            return None
+            return None, final_messages
     except (ValidationError, NotInitializedError) as val_err:
         helper_logger.error(
             f"Validation dependency error at stage '{validation_stage}': {val_err}",
@@ -97,11 +142,14 @@ async def _validate_messages(
             extra={"request_id": request_id},
             exc_info=True,
         )
-        return Status(
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            message=f"Internal error during content validation process ({validation_stage}).",
-            safety_code=SafetyCode.UNEXPECTED,
-            action=Action.OVERRIDE.value,
+        return (
+            Status(
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                message=f"Internal error during content validation process ({validation_stage}).",
+                safety_code=SafetyCode.UNEXPECTED,
+                action=Action.OVERRIDE.value,
+            ),
+            messages_to_validate,
         )
 
 

@@ -214,7 +214,7 @@ class TestClaudeProxyHelperFunctions:
 class TestClaudeProxyAdditionalCases:
     """Additional tests for Claude proxy route edge cases."""
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_with_beta_header(
         self,
         mock_validate: AsyncMock,
@@ -253,7 +253,7 @@ class TestClaudeProxyAdditionalCases:
         sent_headers = call_kwargs.get("headers", {})
         assert sent_headers.get("anthropic-beta") == "claude-3-haiku-20240307"
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_timeout_handling(
         self,
         mock_validate: AsyncMock,
@@ -280,7 +280,7 @@ class TestClaudeProxyAdditionalCases:
         assert "Request to Anthropic Claude timed out" in response_data["message"]
         assert response_data["action"] == Action.RETRY.value
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_malformed_backend_response(
         self,
         mock_validate: AsyncMock,
@@ -310,7 +310,7 @@ class TestClaudeProxyAdditionalCases:
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_missing_content_in_response(
         self,
         mock_validate: AsyncMock,
@@ -345,7 +345,7 @@ class TestClaudeProxyAdditionalCases:
         assert response_data == {"id": "msg_123", "model": "claude-3"}
         assert HEADER_GUARDRAILED_BLOCKED not in response.headers
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_user_id_extraction(
         self,
         mock_validate: AsyncMock,
@@ -381,7 +381,7 @@ class TestClaudeProxyAdditionalCases:
         call_args = mock_validate.call_args_list[0][1]
         assert call_args.get("user_id") == "test-user-123"
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_response_headers_forwarding(
         self,
         mock_validate: AsyncMock,
@@ -431,7 +431,7 @@ class TestClaudeProxyAdditionalCases:
         # The x-request-id is being overwritten with a new UUID by the test client or middleware
         assert "x-request-id" in response.headers
 
-    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=None)
+    @patch(VALIDATE_MESSAGES_PATH, new_callable=AsyncMock, return_value=(None, []))
     def test_claude_proxy_non_json_content_type(
         self,
         mock_validate: AsyncMock,

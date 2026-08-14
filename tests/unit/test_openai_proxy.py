@@ -18,11 +18,8 @@ from src.shared import (
 )
 
 
-@pytest.mark.usefixtures(
-    "mock_app_state_for_proxy", "mock_http_client_instance_fixture"
-)
 @pytest.fixture(scope="function")
-def client(mock_app_state_for_proxy):
+def client(mock_app_state_for_proxy, mock_http_client_instance_fixture):
     """Provides a TestClient instance for the main application."""
     app.dependency_overrides = {}
     test_client = TestClient(app, raise_server_exceptions=False)
@@ -70,7 +67,7 @@ def test_openai_proxy_success(
     client: TestClient,
 ):
     """Test successful request flow: Input OK -> Forward -> Output OK -> Return OpenAI response."""
-    mock_validate.return_value = None
+    mock_validate.return_value = (None, [])
 
     mock_backend_response = MagicMock()
     mock_backend_response.status_code = status.HTTP_200_OK
@@ -104,7 +101,7 @@ def test_openai_proxy_input_blocked(
     client: TestClient,
 ):
     """Test input blocked flow: Input FAIL -> Return 200 + Fake Body + Headers."""
-    mock_validate.return_value = UNSAFE_STATUS_BLOCK
+    mock_validate.return_value = (UNSAFE_STATUS_BLOCK, [])
 
     headers = {"Authorization": "Bearer valid-key"}
 
@@ -138,7 +135,7 @@ def test_openai_proxy_output_blocked(
 ):
     """Test output blocked flow: Input OK -> Forward -> Output FAIL -> Return 200 + Fake Body + Headers."""
 
-    mock_validate.side_effect = [None, UNSAFE_STATUS_BLOCK]
+    mock_validate.side_effect = [(None, []), (UNSAFE_STATUS_BLOCK, [])]
 
     mock_backend_response = MagicMock()
     mock_backend_response.status_code = status.HTTP_200_OK
@@ -180,7 +177,7 @@ def test_openai_proxy_validation_internal_error(
     client: TestClient,
 ):
     """Test flow when validator returns an internal error status."""
-    mock_validate.return_value = INTERNAL_ERROR_STATUS
+    mock_validate.return_value = (INTERNAL_ERROR_STATUS, [])
 
     headers = {"Authorization": "Bearer valid-key"}
 
@@ -208,7 +205,7 @@ def test_openai_proxy_backend_api_error(
     client: TestClient,
 ):
     """Test passthrough of backend OpenAI API errors (e.g., 401, 429)."""
-    mock_validate.return_value = None
+    mock_validate.return_value = (None, [])
 
     mock_request_for_exception = httpx.Request(
         method="POST", url="https://api.openai.com/v1/chat/completions"
@@ -260,7 +257,7 @@ def test_openai_proxy_backend_network_error(
     client: TestClient,
 ):
     """Test handling of network errors when calling backend."""
-    mock_validate.return_value = None
+    mock_validate.return_value = (None, [])
     network_exception = httpx.TimeoutException(
         "Connection timed out mock", request=MagicMock()
     )
@@ -315,7 +312,7 @@ def test_openai_proxy_streaming_not_implemented(
     client: TestClient,
 ):
     """Test streaming request returns 501 Not Implemented."""
-    mock_validate.return_value = None
+    mock_validate.return_value = (None, [])
     headers = {"Authorization": "Bearer valid-key"}
     request_body = {**SAMPLE_OAI_REQUEST, "stream": True}
 

@@ -12,12 +12,12 @@ import src.presentation.proxy_utils as proxy_utils
 from src.core import app_state
 from src.exceptions import (
     AuthenticationError,
-    NotInitializedError,
     GuardrailedHTTPException,
+    NotInitializedError,
     ValidationError,
 )
 from src.presentation.dependencies import get_loaded_policies
-from src.shared import Action, Agent, Policy, SafetyCode, Status
+from src.shared import Action, Agent, Policy, SafetyCode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _extract_claude_api_key(request: Request) -> Optional[str]:
 
 
 def _extract_input_messages_from_claude(
-    request_data: Dict[str, Any]
+    request_data: Dict[str, Any],
 ) -> List[Dict[str, str]]:
     """
     Converts Claude's 'messages' structure to Guardrailed's message list format.
@@ -90,7 +90,7 @@ def _extract_input_messages_from_claude(
 
 
 def _extract_output_message_from_claude(
-    response_data: Dict[str, Any]
+    response_data: Dict[str, Any],
 ) -> Optional[Dict[str, str]]:
     """
     Extracts the primary text response from Claude's output structure ('content' array).
@@ -185,7 +185,7 @@ async def claude_messages_proxy(
             f"Validating {len(input_messages)} input messages.", extra=log_extra
         )
 
-        input_status: Optional[Status] = await proxy_utils._validate_messages(
+        input_status, _ = await proxy_utils._validate_messages(
             messages_to_validate=input_messages,
             policies=loaded_policies,
             user_id=user_id,
@@ -299,7 +299,7 @@ async def claude_messages_proxy(
 
         if llm_output_message:
             logger.debug("Validating Claude output message.", extra=log_extra)
-            output_status: Optional[Status] = await proxy_utils._validate_messages(
+            output_status, _ = await proxy_utils._validate_messages(
                 messages_to_validate=[llm_output_message],
                 policies=loaded_policies,
                 user_id=user_id,

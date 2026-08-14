@@ -33,6 +33,29 @@ def _get_entities_to_scan(policy: Policy) -> Optional[List[str]]:
     return entities_to_scan
 
 
+def _anonymize(prompt: str, results: PresidioResultList) -> Optional[str]:
+    """
+    Replace detected entities with '<ENTITY_TYPE>' placeholders.
+
+    Returns None if the anonymizer is unavailable or fails, so callers can fail
+    closed rather than forwarding unredacted content.
+    """
+    anonymizer_engine = app_state.presidio_anonymizer_engine
+    if not anonymizer_engine:
+        logger.error("Presidio Anonymizer engine not initialized; cannot redact.")
+        return None
+    try:
+        return str(
+            anonymizer_engine.anonymize(
+                text=prompt,
+                analyzer_results=results,  # type: ignore[arg-type]
+            ).text
+        )
+    except Exception as e:
+        logger.error(f"PII anonymization failed: {e}", exc_info=True)
+        return None
+
+
 async def check_pii(
     prompt: str,
     policy: Policy,
@@ -76,6 +99,27 @@ async def check_pii(
         if policy.action == Action.OBSERVE.value:
             logger.info(f"{log_message}. Action=OBSERVE, allowing request to proceed.")
             return Result.safe_result()
+        elif policy.action == Action.REDACT.value:
+            redacted = _anonymize(prompt, final_analyzer_results)
+            if redacted is None:
+                logger.error(
+                    f"{log_message}. Redaction failed; blocking instead of "
+                    "forwarding unredacted content."
+                )
+                return Result.unsafe_result(
+                    message=policy.message,
+                    safety_code=SafetyCode.PII_DETECTED,
+                    action=Action.OVERRIDE.value,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            logger.info(f"{log_message}. Action=REDACT, replacing detected entities.")
+            return Result.unsafe_result(
+                message=policy.message,
+                safety_code=SafetyCode.PII_DETECTED,
+                action=Action.REDACT.value,
+                processed_content=redacted,
+                status_code=status.HTTP_200_OK,
+            )
         else:
             logger.warning(
                 f"{log_message}. Action={Action(policy.action).name}, blocking request."
