@@ -15,3 +15,4 @@ dmypy.json
 .env
 node_modules/
 logs
+evals/results_*.json
