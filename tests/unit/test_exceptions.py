@@ -2,10 +2,10 @@ from fastapi import HTTPException, status
 
 from src.exceptions import (
     AuthenticationError,
-    InitializationError,
-    NotInitializedError,
     GuardrailedBaseError,
     GuardrailedHTTPException,
+    InitializationError,
+    NotInitializedError,
     ValidationError,
 )
 from src.shared import Action, SafetyCode

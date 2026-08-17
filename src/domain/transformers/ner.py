@@ -38,7 +38,7 @@ class NERModel(BaseTransformerModel[AutoModelForTokenClassification]):  # type: 
                 model, use_float16 = self._setup_model_precision(model)
                 model.eval()
 
-                ner_pipe = pipeline(
+                ner_pipe = pipeline(  # type: ignore[call-overload]
                     "ner",
                     model=model,
                     tokenizer=tokenizer,
@@ -47,7 +47,7 @@ class NERModel(BaseTransformerModel[AutoModelForTokenClassification]):  # type: 
                     aggregation_strategy="simple",
                 )
 
-                return model, tokenizer, ner_pipe, use_float16
+                return model, tokenizer, ner_pipe, use_float16  # type: ignore[return-value]
             except Exception as e:
                 logger.error(f"Failed to initialize NER model {self.model_name}: {e}")
                 raise

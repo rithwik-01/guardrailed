@@ -20,7 +20,7 @@ def register_middleware(app: FastAPI) -> FastAPI:
     logger.info("Registering API middleware components (OS Core)")
 
     if middleware_config.security.enabled:
-        app.add_middleware(SecurityMiddleware)
+        app.add_middleware(SecurityMiddleware)  # type: ignore[arg-type]
         logger.info("Registered security middleware")
 
     app.add_middleware(RequestIDMiddleware)
@@ -29,6 +29,6 @@ def register_middleware(app: FastAPI) -> FastAPI:
     app.add_middleware(LoggingMiddleware)
     logger.info("Registered logging middleware")
 
-    app.add_middleware(TimeoutMiddleware)
+    app.add_middleware(TimeoutMiddleware)  # type: ignore[arg-type]
     logger.info("Registered timeout middleware")
     return app

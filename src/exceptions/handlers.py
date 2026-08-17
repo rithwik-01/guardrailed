@@ -25,7 +25,9 @@ ExceptionHandler = Callable[
 ]
 
 
-async def guardrailed_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def guardrailed_exception_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
     """Handler for all GuardrailedBaseError exceptions."""
     guardrailed_exc = exc if isinstance(exc, GuardrailedBaseError) else None
     if not guardrailed_exc:

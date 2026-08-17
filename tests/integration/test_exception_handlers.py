@@ -10,10 +10,10 @@ from starlette.exceptions import (
 
 from src.exceptions import (
     AuthenticationError,
-    InitializationError,
-    NotInitializedError,
     GuardrailedBaseError,
     GuardrailedHTTPException,
+    InitializationError,
+    NotInitializedError,
     ValidationError,
 )
 from src.exceptions.handlers import setup_exception_handlers
